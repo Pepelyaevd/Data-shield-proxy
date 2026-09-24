@@ -28,8 +28,12 @@ test: ## прогнать тесты (stdlib unittest, без установки
 demo: ## сквозная демонстрация DoD без mitmproxy (pipeline + отчёт)
 	$(PY) scripts/demo_e2e.py
 
+.PHONY: webui
+webui: ## лаунчер в браузере (надёжно): кнопка «Открыть Claude (под защитой)»
+	$(PY) launcher/webui.py
+
 .PHONY: ui
-ui: ## GUI-лаунчер: окно с кнопкой «Открыть Claude (под защитой)»
+ui: ## GUI-лаунчер на Tkinter (запасной; на системном Tk 8.5/macOS может не рисовать)
 	$(PY) launcher/ui.py
 
 .PHONY: proxy-up
