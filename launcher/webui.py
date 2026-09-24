@@ -68,6 +68,39 @@ def _overrides(subs):
     return ov
 
 
+def _resolve_binary(name):
+    """Находит абсолютный путь к исполняемому файлу агента.
+
+    Серверный процесс UI может быть запущен не из login-shell (нет ~/.local/bin
+    в PATH), да и открываемый терминал не всегда его видит — поэтому ищем явно
+    и вписываем абсолютный путь в скрипт запуска.
+    """
+    p = shutil.which(name)
+    if p:
+        return p
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, ".local", "bin", name),
+        os.path.join(home, ".claude", "local", name),
+        os.path.join(home, "bin", name),
+        f"/opt/homebrew/bin/{name}",
+        f"/usr/local/bin/{name}",
+        f"/usr/bin/{name}",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    shell = os.environ.get("SHELL", "/bin/zsh")
+    try:
+        out = subprocess.run([shell, "-lic", f"command -v {shlex.quote(name)}"],
+                             capture_output=True, text=True, timeout=8).stdout.strip()
+        if out and os.path.isfile(out.splitlines()[-1]):
+            return out.splitlines()[-1]
+    except Exception:
+        pass
+    return None
+
+
 def _write_script(subs, run_cmd):
     lines = ["#!/bin/bash", "clear",
              'echo "[Data-Shield-Proxy] Трафик агента под корпоративным мониторингом."',
@@ -187,10 +220,12 @@ class Handler(BaseHTTPRequestHandler):
                      data.get("secret") or "", data.get("ca") or DEFAULT_CA)
         try:
             if self.path == "/open":
-                if not shutil.which("claude"):
-                    self._json({"ok": False, "msg": "'claude' не найден в PATH."})
+                claude = _resolve_binary("claude")
+                if not claude:
+                    self._json({"ok": False, "msg": "'claude' не найден. Проверь, что "
+                                "Claude Code установлен (ожидается в ~/.local/bin/claude)."})
                     return
-                path = _write_script(subs, ["claude"])
+                path = _write_script(subs, [claude])
                 self._json({"ok": True, "msg": _open_terminal(path) +
                             f" Пользователь: {user}. Пиши запросы в терминале."})
             elif self.path == "/check":
