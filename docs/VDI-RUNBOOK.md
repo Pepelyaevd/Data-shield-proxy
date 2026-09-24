@@ -44,7 +44,8 @@ vdi 'echo OK: $(hostname)'
 | Контейнер | `dsp-proxy` (образ `mitmproxy/mitmproxy:latest`) |
 | Порт | `8080` (публично, `0.0.0.0`) |
 | Секрет-ворота | `DSP_PROXY_SECRET` (см. `.dsp.env` / `secrets/vdi.env`) |
-| Код проекта | `/root/dsp` (`proxy/ dlp/ catalog/ storage/ report/`) |
+| Админ-панель | `dsp-admin` (образ `python:3.12-slim`), порт `9900` — Control Plane |
+| Код проекта | `/root/dsp` (`proxy/ dlp/ catalog/ storage/ report/ controlplane/`) |
 | CA (issuing) | `/root/dsp/mitmproxy-ca/mitmproxy-ca-cert.pem` |
 | События (SQLite) | `/root/dsp/data/events.db` |
 | VPN на том же хосте | контейнер `amnezia-awg2` (UDP 30048) — **не трогать** |
@@ -75,10 +76,45 @@ vdi 'docker logs dsp-proxy 2>&1 | grep -iE "DLP alert|Отклонён"'
 vdi 'docker restart dsp-proxy'
 
 # обновить код на сервере (с рабочей машины, из корня репо):
-tar czf - --exclude=__pycache__ proxy dlp catalog storage report \
+tar czf - --exclude=__pycache__ proxy dlp catalog storage report controlplane \
   | ssh -i "$VDI_KEY" "$VDI_USER@$VDI_HOST" 'tar xzf - -C /root/dsp'
 vdi 'docker restart dsp-proxy'   # подхватить изменения addon/конфига
+vdi 'docker restart dsp-admin'   # подхватить изменения Control Plane (если поднят)
 ```
+
+---
+
+## Control Plane — админский Web UI (server-side)
+
+Панель отчётов/инцидентов/уровней риска для офицера безопасности вместо
+CLI-отчётов. Уровень риска пользователя вычисляется системой автоматически из
+истории DLP-срабатываний. Слушает порт `9900`, читает ту же БД `/root/dsp/data/events.db`.
+
+**Первый запуск** (после того как код с `controlplane/` залит в `/root/dsp`, см.
+«обновить код на сервере» выше):
+```bash
+vdi 'docker rm -f dsp-admin 2>/dev/null; docker run -d --name dsp-admin \
+  --restart unless-stopped \
+  -e DSP_DB_PATH=/app/data/events.db \
+  -e DSP_ADMIN_HOST=0.0.0.0 -e DSP_ADMIN_PORT=9900 -e DSP_ADMIN_NO_BROWSER=1 \
+  -e DSP_ADMIN_USER=admin -e DSP_ADMIN_PASSWORD=ChangeMe!DSP-2026 \
+  -v /root/dsp:/app -w /app \
+  -p 9900:9900 python:3.12-slim \
+  python3 -m controlplane.server'
+```
+Открыть: **http://<VDI_HOST>:9900** (для текущего стенда — http://151.247.197.142:9900),
+логин `admin`, пароль из `DSP_ADMIN_PASSWORD`.
+
+**Операции:**
+```bash
+vdi 'docker ps --filter name=dsp-admin --format "{{.Status}} {{.Ports}}"'
+vdi 'docker logs --tail 50 dsp-admin'
+vdi 'docker restart dsp-admin'          # после обновления кода
+```
+
+> ⚠️ Это административный доступ на публичном порту с паролем-заглушкой. Смените
+> `DSP_ADMIN_PASSWORD` (пересоздать контейнер с новым env) и ограничьте порт 9900
+> списком IP офицеров (аналогично порту 8080, через `DOCKER-USER`).
 
 ---
 
@@ -123,5 +159,6 @@ python3 launcher/launch.py -- curl -sS https://api.anthropic.com/v1/messages \
 - [ ] Сменить root-пароль сервера.
 - [ ] Ограничить порт 8080 списком IP клиентов (через `DOCKER-USER`, не трогая
       правила Amnezia/WireGuard), либо вернуть прокси за SSH-туннель.
+- [ ] Сменить `DSP_ADMIN_PASSWORD` и ограничить порт 9900 (админ-панель) по IP.
 - [ ] Заменить секрет-ворота на реальную аутентификацию (SSO/mTLS).
 - [ ] `secrets/` (ключ, `vdi.env`) — только локально, не коммитить.
