@@ -86,6 +86,20 @@ class TestEntropyDetector(unittest.TestCase):
     def test_plain_word_ignored(self):
         self.assertEqual(detect_entropy("informationtechnology"), [])
 
+    def test_structural_noise_ignored(self):
+        # git-SHA, md5/sha, UUID, длинные числа — не секреты, а служебные id.
+        for noise in (
+            "9f8a7c6b5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f00",   # git sha (hex40)
+            "d41d8cd98f00b204e9800998ecf8427e",            # md5 (hex32)
+            "550e8400-e29b-41d4-a716-446655440000",        # UUID
+            "1716239022314159265321",                      # длинное число
+        ):
+            self.assertEqual(detect_entropy(noise), [], f"шум не должен ловиться: {noise}")
+
+    def test_short_token_below_min_len(self):
+        # 20 символов < нового min_len (24) — не срабатывает
+        self.assertEqual(detect_entropy("Zx9Kq2Lm8Pw4Rt7Vn3B"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

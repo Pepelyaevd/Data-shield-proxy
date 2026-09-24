@@ -24,7 +24,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from catalog import classify, parse_request, parse_response  # noqa: E402
+from catalog import classify, is_telemetry, parse_request, parse_response  # noqa: E402
 from dlp import DlpEngine  # noqa: E402
 from proxy.config import ProxyConfig  # noqa: E402
 from proxy.identity import Identity, decode_proxy_authorization  # noqa: E402
@@ -146,12 +146,21 @@ class DataShieldAddon:
         provider = classify(host)
         ident = self._resolve_identity(flow)
 
+        # «Не-DLP» egress (телеметрия/observability): фиксируем факт исходящего
+        # трафика для аудита, но НЕ инспектируем — иначе тонем в false-positive.
+        telemetry = is_telemetry(host) and not self.cfg.scan_telemetry
+        flow.metadata["dsp_skip_scan"] = telemetry
+
         parser = provider.parser if provider else "generic"
         content_type = flow.request.headers.get("content-type", "")
         body = self._get_content(flow.request)
 
-        parsed = parse_request(parser, content_type, body)
-        result = self.dlp.scan(parsed.text)
+        if telemetry:
+            parsed = parse_request(parser, content_type, b"")  # без извлечения текста
+            result = self.dlp.scan("")
+        else:
+            parsed = parse_request(parser, content_type, body)
+            result = self.dlp.scan(parsed.text)
 
         device = ident.device or (
             flow.client_conn.peername[0] if flow.client_conn.peername else None
@@ -197,7 +206,11 @@ class DataShieldAddon:
         if event is None:
             return
 
-        if self.cfg.scan_responses and flow.response is not None:
+        if (
+            self.cfg.scan_responses
+            and flow.response is not None
+            and not flow.metadata.get("dsp_skip_scan")
+        ):
             provider = classify(flow.request.pretty_host)
             parser = provider.parser if provider else "generic"
             content_type = flow.response.headers.get("content-type", "")

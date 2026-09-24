@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Callable, List
+from typing import Callable, Dict, List
 
 from dlp.types import Finding, Severity, mask, fingerprint
 
@@ -22,13 +22,16 @@ from dlp.types import Finding, Severity, mask, fingerprint
 # Вспомогательное
 # --------------------------------------------------------------------------- #
 
-def _finding(detector: str, category: str, severity: str, raw: str) -> Finding:
+def _finding(detector: str, category: str, severity: str, raw: str,
+             span: tuple = (-1, -1)) -> Finding:
     return Finding(
         detector=detector,
         category=category,
         severity=severity,
         snippet=mask(raw),
         fp=fingerprint(raw),
+        start=span[0],
+        end=span[1],
     )
 
 
@@ -130,11 +133,13 @@ def detect_secrets(text: str) -> List[Finding]:
     out: List[Finding] = []
     for detector, severity, pattern in _SECRET_PATTERNS:
         for m in re.finditer(pattern, text):
-            out.append(_finding(detector, "secret", severity, m.group(0)))
+            out.append(_finding(detector, "secret", severity, m.group(0), m.span()))
     for m in _ASSIGNMENT_RE.finditer(text):
         value = m.group(2)
-        # не дублируем то, что уже поймали более специфичные детекторы
-        out.append(_finding("credential_assignment", "secret", Severity.MEDIUM, value))
+        # credential_assignment — «широкий» детектор; в движке подавляется, если
+        # спан значения уже покрыт более специфичной сигнатурой (см. engine).
+        out.append(_finding("credential_assignment", "secret", Severity.MEDIUM,
+                            value, m.span(2)))
     return out
 
 
@@ -157,25 +162,25 @@ def detect_pii(text: str) -> List[Finding]:
     claimed: List[tuple] = []  # спаны (start, end), уже занятые card/inn/snils
 
     for m in _EMAIL_RE.finditer(text):
-        out.append(_finding("email", "pii", Severity.LOW, m.group(0)))
+        out.append(_finding("email", "pii", Severity.LOW, m.group(0), m.span()))
 
     for m in _CARD_RE.finditer(text):
         raw = m.group(0)
         if luhn_valid(raw):
             claimed.append(m.span())
-            out.append(_finding("credit_card", "pii", Severity.HIGH, raw))
+            out.append(_finding("credit_card", "pii", Severity.HIGH, raw, m.span()))
 
     for m in _INN_RE.finditer(text):
         raw = m.group(1)
         if inn_valid(raw):
             claimed.append(m.span(1))
-            out.append(_finding("ru_inn", "pii", Severity.MEDIUM, raw))
+            out.append(_finding("ru_inn", "pii", Severity.MEDIUM, raw, m.span(1)))
 
     for m in _SNILS_RE.finditer(text):
         raw = m.group(0)
         if snils_valid(raw):
             claimed.append(m.span())
-            out.append(_finding("ru_snils", "pii", Severity.MEDIUM, raw))
+            out.append(_finding("ru_snils", "pii", Severity.MEDIUM, raw, m.span()))
 
     # Телефоны — самый шумный детектор: требуем разделители/скобки/'+',
     # чтобы не ловить произвольные числовые последовательности; и пропускаем
@@ -189,7 +194,7 @@ def detect_pii(text: str) -> List[Finding]:
             continue
         if _overlaps(m.span(), claimed):
             continue
-        out.append(_finding("phone", "pii", Severity.LOW, raw))
+        out.append(_finding("phone", "pii", Severity.LOW, raw, m.span()))
 
     return out
 
@@ -209,21 +214,46 @@ def _overlaps(span: tuple, claimed: List[tuple]) -> bool:
 _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
 # Что похоже на структурный шум, а не на секрет (снижаем false-positive):
 _LOOKS_LIKE_WORD_RE = re.compile(r"^[A-Za-z][a-z]+$")
+# Идентификаторы/хэши/трейс- id: доминирующий источник шума high_entropy_string.
+# Настоящие ключи такого вида ловятся сигнатурами; эти же формы — служебные поля
+# телеметрии, git-SHA, md5/sha, UUID, uuid-подобные id, длинные числа/таймстемпы.
+_HEX_ONLY_RE = re.compile(r"^[0-9a-fA-F]+$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_DIGITS_ONLY_RE = re.compile(r"^[0-9]+$")
 
 
-def detect_entropy(text: str, min_entropy: float = 4.0, min_len: int = 20) -> List[Finding]:
+def _is_structural_noise(tok: str) -> bool:
+    """True для токенов-идентификаторов, которые почти никогда не секрет."""
+    if _DIGITS_ONLY_RE.match(tok):          # длинные числа, таймстемпы, счётчики
+        return True
+    if _UUID_RE.match(tok):                 # UUID/GUID
+        return True
+    if _HEX_ONLY_RE.match(tok):             # git-SHA, md5/sha-хэши, trace/span id
+        return True
+    return False
+
+
+# Пороги подняты (было 4.0/20): меньше ложных срабатываний на «шумных», но
+# не-секретных строках. Переопределяются через env в движке при необходимости.
+def detect_entropy(text: str, min_entropy: float = 4.2, min_len: int = 24) -> List[Finding]:
     out: List[Finding] = []
     seen = set()
     for m in _TOKEN_RE.finditer(text):
         tok = m.group(0)
         if len(tok) < min_len or _LOOKS_LIKE_WORD_RE.match(tok):
             continue
+        if _is_structural_noise(tok):
+            continue
         fp = fingerprint(tok)
-        if fp in seen:
+        if fp in seen:  # дедуп одинаковых значений в пределах одного скана
             continue
         if shannon_entropy(tok) >= min_entropy:
             seen.add(fp)
-            out.append(_finding("high_entropy_string", "secret", Severity.MEDIUM, tok))
+            out.append(_finding("high_entropy_string", "secret", Severity.MEDIUM,
+                                tok, m.span()))
     return out
 
 
@@ -233,3 +263,18 @@ ALL_DETECTORS: List[Callable[[str], List[Finding]]] = [
     detect_pii,
     detect_entropy,
 ]
+
+# Приоритет специфичности детектора для кросс-детекторной дедупликации в движке:
+# при пересечении спанов остаётся находка с бо́льшим приоритетом, «широкая»
+# подавляется. Специфичные сигнатуры/PII = 3 (дефолт), присваивание = 2,
+# энтропия = 1. Так один и тот же секрет не даёт дублей
+# (например, sk-... как openai_key И как high_entropy_string).
+DETECTOR_PRIORITY: Dict[str, int] = {
+    "high_entropy_string": 1,
+    "credential_assignment": 2,
+}
+DEFAULT_DETECTOR_PRIORITY = 3
+
+
+def detector_priority(detector: str) -> int:
+    return DETECTOR_PRIORITY.get(detector, DEFAULT_DETECTOR_PRIORITY)

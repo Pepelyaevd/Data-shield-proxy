@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List, Optional
 
-from dlp.detectors import ALL_DETECTORS
+from dlp.detectors import ALL_DETECTORS, detector_priority
 from dlp.types import DlpResult, Finding, Verdict
 
 
@@ -34,6 +34,7 @@ class DlpEngine:
                 continue
 
         findings = self._dedupe(raw)
+        findings = self._suppress_overlaps(findings)
         verdict = Verdict.ALERT if findings else Verdict.ALLOW
         return DlpResult(verdict=verdict, findings=findings)
 
@@ -48,6 +49,32 @@ class DlpEngine:
             else:
                 merged[key] = f
         return list(merged.values())
+
+    @staticmethod
+    def _suppress_overlaps(findings: List[Finding]) -> List[Finding]:
+        """Кросс-детекторная дедупликация по спанам.
+
+        Если спан «широкой» находки (high_entropy_string, credential_assignment)
+        пересекается со спаном более специфичной (сигнатура/PII), широкая
+        отбрасывается — тот же секрет не даёт дублей в рамках одного скана.
+        Находки без спанов (start<0) не участвуют в подавлении.
+        """
+        located = [f for f in findings if f.start >= 0 and f.end > f.start]
+        if len(located) < 2:
+            return findings
+
+        drop: set = set()
+        for i, a in enumerate(located):
+            for b in located[i + 1:]:
+                if a.start < b.end and b.start < a.end:  # спаны пересекаются
+                    pa, pb = detector_priority(a.detector), detector_priority(b.detector)
+                    if pa == pb:
+                        continue  # одинаковая специфичность — оба сохраняем
+                    loser = b if pa > pb else a
+                    drop.add(id(loser))
+        if not drop:
+            return findings
+        return [f for f in findings if id(f) not in drop]
 
 
 # Удобный модульный вход для разовых сканов.

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Dict, List
 
 
@@ -65,9 +65,21 @@ class Finding:
     snippet: str  # МАСКИРОВАННЫЙ фрагмент (не сырой секрет)
     fp: str = ""  # fingerprint сырого значения (sha256[:16])
     count: int = 1  # сколько раз встретилось это же значение
+    # Спан совпадения в отсканированном тексте — ВНУТРЕННЕЕ поле для
+    # кросс-детекторной дедупликации в движке. Наружу (to_dict) не уходит.
+    start: int = -1
+    end: int = -1
 
     def to_dict(self) -> Dict[str, object]:
-        return asdict(self)
+        # Явно перечисляем поля хранимой схемы: спаны — служебные, их не сохраняем.
+        return {
+            "detector": self.detector,
+            "category": self.category,
+            "severity": self.severity,
+            "snippet": self.snippet,
+            "fp": self.fp,
+            "count": self.count,
+        }
 
 
 @dataclass

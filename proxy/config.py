@@ -29,6 +29,10 @@ class ProxyConfig:
     db_path: str = os.environ.get("DSP_DB_PATH", "data/events.db")
     default_user: str = os.environ.get("DSP_DEFAULT_USER", "unknown")
     scan_responses: bool = _env_bool("DSP_SCAN_RESPONSES", True)
+    # Инспектировать ли egress на телеметрию/observability (datadog/sentry/…).
+    # По умолчанию False: это не канал утечки промптов, а служебный трафик агентов
+    # — главный источник false-positive. См. catalog.is_telemetry.
+    scan_telemetry: bool = _env_bool("DSP_SCAN_TELEMETRY", False)
     max_body_bytes: int = _env_int("DSP_MAX_BODY", 2_000_000)
     enforce: bool = _env_bool("DSP_ENFORCE", False)  # False = alert-only (MVP)
 
