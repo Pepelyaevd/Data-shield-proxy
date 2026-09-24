@@ -28,6 +28,28 @@ services:
       - ${HOME}/.mitmproxy:/home/mitmproxy/.mitmproxy  # CA (стабильный путь для лаунчера)
     restart: unless-stopped
 
+  # Админский Web UI (Control Plane): отчёты/инциденты/уровни риска.
+  #   docker compose up -d admin        # поднять панель на :9900
+  # ВНИМАНИЕ: пароль ниже — заглушка MVP. Смените DSP_ADMIN_PASSWORD и по
+  # возможности ограничьте порт 9900 на фаерволе списком IP офицеров.
+  admin:
+    image: python:3.12-slim
+    working_dir: /app
+    command: ["python3", "-m", "controlplane.server"]
+    environment:
+      DSP_DB_PATH: /app/data/events.db
+      DSP_ADMIN_HOST: 0.0.0.0            # слушать снаружи контейнера
+      DSP_ADMIN_PORT: "9900"
+      DSP_ADMIN_NO_BROWSER: "1"          # на сервере браузер не открывать
+      DSP_ADMIN_USER: admin
+      DSP_ADMIN_PASSWORD: "ChangeMe!DSP-2026"
+    ports:
+      - "9900:9900"
+    volumes:
+      - ..:/app
+      - ../data:/app/data
+    restart: unless-stopped
+
   # Разовые отчёты: docker compose run --rm report <usage|incidents|summary|html> ...
   report:
     image: python:3.12-slim

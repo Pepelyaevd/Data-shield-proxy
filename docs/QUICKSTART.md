@@ -109,6 +109,23 @@ docker run -d --name dsp-proxy --restart unless-stopped \
 > Открытый прокси защищён `DSP_PROXY_SECRET`; для прод-безопасности ограничьте
 > порт 8080 на фаерволе списком IP клиентов.
 
+**Сервер — админский Web UI (Control Plane)** на том же хосте (`/root/dsp` — код,
+общая БД событий). Панель отчётов/инцидентов/уровней риска на порту 9900:
+```bash
+docker run -d --name dsp-admin --restart unless-stopped \
+  -e DSP_DB_PATH=/app/data/events.db \
+  -e DSP_ADMIN_HOST=0.0.0.0 -e DSP_ADMIN_PORT=9900 -e DSP_ADMIN_NO_BROWSER=1 \
+  -e DSP_ADMIN_USER=admin -e DSP_ADMIN_PASSWORD='ChangeMe!DSP-2026' \
+  -v /root/dsp:/app -w /app \
+  -p 9900:9900 python:3.12-slim \
+  python3 -m controlplane.server
+```
+Открыть: `http://<server-ip>:9900` (логин/пароль — из env выше).
+> Панель показывает метаданные инцидентов и вычисленные системой уровни риска.
+> Смените `DSP_ADMIN_PASSWORD` и ограничьте порт 9900 на фаерволе списком IP
+> офицеров безопасности — это административный доступ.
+> Обновление после `git pull` в `/root/dsp`: `docker restart dsp-admin`.
+
 **Клиент.** Конфиг провижинится один раз (в проде — через MDM/установщик),
 после чего команда запуска — одна. Лаунчер сам подхватывает `DSP_*` из файла
 `.dsp.env` (или `~/.dsp.conf`, или `$DSP_CONFIG`):
