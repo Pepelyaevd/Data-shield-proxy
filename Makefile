@@ -28,6 +28,10 @@ test: ## прогнать тесты (stdlib unittest, без установки
 demo: ## сквозная демонстрация DoD без mitmproxy (pipeline + отчёт)
 	$(PY) scripts/demo_e2e.py
 
+.PHONY: ui
+ui: ## GUI-лаунчер: окно с кнопкой «Открыть Claude (под защитой)»
+	$(PY) launcher/ui.py
+
 .PHONY: proxy-up
 proxy-up: ## поднять прокси (docker compose)
 	cd deploy && $(COMPOSE) up -d proxy
