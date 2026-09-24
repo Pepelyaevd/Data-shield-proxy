@@ -53,6 +53,10 @@ proxy-down: ## остановить прокси
 ca-install: ## установить CA mitmproxy в доверенное хранилище
 	deploy/install-ca.sh
 
+.PHONY: admin
+admin: ## Control Plane — админский Web UI (отчёты/инциденты/уровни)
+	$(PY) -m controlplane.server
+
 .PHONY: report
 report: ## краткая сводка по событиям
 	$(PY) -m report.cli summary

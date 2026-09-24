@@ -18,6 +18,36 @@ _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 DEFAULT_DB_PATH = os.environ.get("DSP_DB_PATH", "data/events.db")
 
+# Уровни риска пользователя (по возрастанию серьёзности). Присваиваются СИСТЕМОЙ
+# автоматически по истории DLP-срабатываний (не вручную офицером).
+RISK_LEVELS = ("yellow", "orange", "red", "black")
+
+# Порядок серьёзности находок DLP (для сортировки топ-проблем).
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def classify_level(ncrit: int, nhigh: int, nmed: int, nlow: int) -> Optional[str]:
+    """Правило автоматического присвоения уровня риска пользователю.
+
+    Вход — число DLP-находок пользователя по серьёзности за период.
+    Возвращает уровень (yellow/orange/red/black) либо None для «чистого»
+    пользователя (срабатываний нет). Пороги подобраны для MVP и объяснимы:
+
+        black  — ≥2 критических (повторная/множественная утечка секретов);
+        red    — ≥1 критическая ИЛИ ≥3 high;
+        orange — ≥1 high ИЛИ ≥2 medium;
+        yellow — есть хотя бы одна находка medium/low.
+    """
+    if ncrit >= 2:
+        return "black"
+    if ncrit >= 1 or nhigh >= 3:
+        return "red"
+    if nhigh >= 1 or nmed >= 2:
+        return "orange"
+    if nmed >= 1 or nlow >= 1:
+        return "yellow"
+    return None
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -85,8 +115,10 @@ class EventStore:
 
     # ---- выборки для отчётности ------------------------------------------- #
 
-    def usage_by_user(self, since: Optional[str] = None) -> List[sqlite3.Row]:
-        where, params = self._since_clause(since)
+    def usage_by_user(
+        self, since: Optional[str] = None, until: Optional[str] = None
+    ) -> List[sqlite3.Row]:
+        where, params = self._period_clause(since, until)
         return self.conn.execute(
             f"""
             SELECT user,
@@ -95,7 +127,8 @@ class EventStore:
                    COUNT(DISTINCT provider)                  AS providers,
                    SUM(COALESCE(tokens_in, 0))               AS tokens_in,
                    SUM(COALESCE(tokens_out, 0))              AS tokens_out,
-                   SUM(CASE WHEN verdict='alert' THEN 1 ELSE 0 END) AS alerts
+                   SUM(CASE WHEN verdict='alert' THEN 1 ELSE 0 END) AS alerts,
+                   MAX(ts)                                   AS last_seen
             FROM events
             {where}
             GROUP BY user
@@ -104,8 +137,10 @@ class EventStore:
             params,
         ).fetchall()
 
-    def usage_by_agent(self, since: Optional[str] = None) -> List[sqlite3.Row]:
-        where, params = self._since_clause(since)
+    def usage_by_agent(
+        self, since: Optional[str] = None, until: Optional[str] = None
+    ) -> List[sqlite3.Row]:
+        where, params = self._period_clause(since, until)
         return self.conn.execute(
             f"""
             SELECT agent, provider,
@@ -121,13 +156,20 @@ class EventStore:
         ).fetchall()
 
     def incidents(
-        self, since: Optional[str] = None, user: Optional[str] = None, limit: int = 500
+        self,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        user: Optional[str] = None,
+        limit: int = 500,
     ) -> List[sqlite3.Row]:
         clauses = ["verdict = 'alert'"]
         params: List[Any] = []
         if since:
             clauses.append("ts >= ?")
             params.append(since)
+        if until:
+            clauses.append("ts <= ?")
+            params.append(until)
         if user:
             clauses.append("user = ?")
             params.append(user)
@@ -145,20 +187,167 @@ class EventStore:
             params,
         ).fetchall()
 
-    def counts(self) -> Dict[str, int]:
+    def counts(
+        self, since: Optional[str] = None, until: Optional[str] = None
+    ) -> Dict[str, int]:
+        where, params = self._period_clause(since, until)
         row = self.conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS total,
-                   SUM(CASE WHEN verdict='alert' THEN 1 ELSE 0 END) AS alerts
+                   SUM(CASE WHEN verdict='alert' THEN 1 ELSE 0 END) AS alerts,
+                   COUNT(DISTINCT user) AS users
             FROM events
-            """
+            {where}
+            """,
+            params,
         ).fetchone()
-        return {"total": row["total"] or 0, "alerts": row["alerts"] or 0}
+        return {
+            "total": row["total"] or 0,
+            "alerts": row["alerts"] or 0,
+            "users": row["users"] or 0,
+        }
+
+    def top_problems(
+        self,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Агрегирует сработавшие сигнатуры alert-событий → топ проблем.
+
+        Разбор JSON matched_signatures на стороне Python: в MVP объём alert-событий
+        невелик, а хранить нормализованную таблицу находок пока избыточно.
+        Группировка по (detector, category); severity берётся максимальная.
+        """
+        where, params = self._period_clause(since, until)
+        alert_clause = ("AND verdict='alert'" if where
+                        else "WHERE verdict='alert'")
+        rows = self.conn.execute(
+            f"""
+            SELECT user, matched_signatures
+            FROM events
+            {where} {alert_clause}
+            """,
+            params,
+        ).fetchall()
+
+        agg: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            try:
+                sigs = json.loads(r["matched_signatures"] or "[]")
+            except Exception:
+                continue
+            for s in sigs:
+                det = s.get("detector", "?")
+                cat = s.get("category", "?")
+                sev = s.get("severity", "low")
+                cnt = int(s.get("count", 1) or 1)
+                key = f"{det}|{cat}"
+                a = agg.setdefault(
+                    key,
+                    {
+                        "detector": det,
+                        "category": cat,
+                        "severity": sev,
+                        "hits": 0,
+                        "events": 0,
+                        "users": set(),
+                    },
+                )
+                a["hits"] += cnt
+                a["events"] += 1
+                if r["user"]:
+                    a["users"].add(r["user"])
+                if _SEVERITY_ORDER.get(sev, 0) > _SEVERITY_ORDER.get(a["severity"], 0):
+                    a["severity"] = sev
+
+        out = []
+        for a in agg.values():
+            a["users"] = len(a["users"])
+            out.append(a)
+        out.sort(
+            key=lambda a: (_SEVERITY_ORDER.get(a["severity"], 0), a["hits"]),
+            reverse=True,
+        )
+        return out[:limit]
+
+    def distinct_users(self) -> List[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT user FROM events WHERE user IS NOT NULL ORDER BY user"
+        ).fetchall()
+        return [r["user"] for r in rows]
+
+    # ---- уровни риска пользователей: вычисляются системой ------------------ #
+
+    def user_risk(
+        self, since: Optional[str] = None, until: Optional[str] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Система вычисляет уровень риска каждого пользователя за период.
+
+        Разбирает matched_signatures alert-событий, считает находки по серьёзности
+        и применяет classify_level. Возвращает
+            {user: {level, ncrit, nhigh, nmed, nlow, alerts, reason}}.
+        «Чистые» пользователи (без срабатываний) в результат не попадают —
+        для них уровень отсутствует (None).
+        """
+        where, params = self._period_clause(since, until)
+        alert_clause = ("AND verdict='alert'" if where else "WHERE verdict='alert'")
+        rows = self.conn.execute(
+            f"SELECT user, matched_signatures FROM events {where} {alert_clause}",
+            params,
+        ).fetchall()
+
+        acc: Dict[str, Dict[str, int]] = {}
+        for r in rows:
+            user = r["user"] or "—"
+            try:
+                sigs = json.loads(r["matched_signatures"] or "[]")
+            except Exception:
+                continue
+            a = acc.setdefault(
+                user, {"ncrit": 0, "nhigh": 0, "nmed": 0, "nlow": 0, "alerts": 0}
+            )
+            a["alerts"] += 1
+            for s in sigs:
+                sev = s.get("severity", "low")
+                cnt = int(s.get("count", 1) or 1)
+                key = {"critical": "ncrit", "high": "nhigh",
+                       "medium": "nmed", "low": "nlow"}.get(sev, "nlow")
+                a[key] += cnt
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for user, a in acc.items():
+            level = classify_level(a["ncrit"], a["nhigh"], a["nmed"], a["nlow"])
+            if level is None:
+                continue
+            out[user] = {
+                "level": level,
+                "reason": self._risk_reason(a),
+                **a,
+            }
+        return out
 
     @staticmethod
-    def _since_clause(since: Optional[str]):
+    def _risk_reason(a: Dict[str, int]) -> str:
+        parts = []
+        for label, key in (("критич.", "ncrit"), ("high", "nhigh"),
+                           ("medium", "nmed"), ("low", "nlow")):
+            if a.get(key):
+                parts.append(f"{label}×{a[key]}")
+        return ", ".join(parts) or "—"
+
+    @staticmethod
+    def _period_clause(since: Optional[str], until: Optional[str]):
+        clauses: List[str] = []
+        params: List[Any] = []
         if since:
-            return "WHERE ts >= ?", [since]
+            clauses.append("ts >= ?")
+            params.append(since)
+        if until:
+            clauses.append("ts <= ?")
+            params.append(until)
+        if clauses:
+            return "WHERE " + " AND ".join(clauses), params
         return "", []
 
     def close(self) -> None:

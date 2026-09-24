@@ -22,3 +22,6 @@ CREATE INDEX IF NOT EXISTS idx_events_ts       ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_user     ON events(user);
 CREATE INDEX IF NOT EXISTS idx_events_provider ON events(provider);
 CREATE INDEX IF NOT EXISTS idx_events_verdict  ON events(verdict);
+
+-- Уровни риска пользователей НЕ хранятся: они вычисляются системой на лету из
+-- истории DLP-срабатываний за выбранный период (см. EventStore.user_risk).
