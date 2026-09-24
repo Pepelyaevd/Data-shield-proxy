@@ -38,9 +38,44 @@ if _REPO_ROOT not in sys.path:
 from proxy.identity import encode_proxy_userinfo  # noqa: E402
 
 PROFILES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles.json")
+
+
+def _load_config() -> None:
+    """Провижининг один раз: подхватывает DSP_* из конфиг-файла (KEY=VALUE),
+    не переопределяя уже заданные переменные окружения (env > файл).
+
+    Порядок поиска: $DSP_CONFIG → ./.dsp.env → <repo>/.dsp.env → ~/.dsp.conf.
+    Так повседневная команда клиента сводится к `dsp-launch -- <agent>`.
+    """
+    candidates = [
+        os.environ.get("DSP_CONFIG"),
+        os.path.join(os.getcwd(), ".dsp.env"),
+        os.path.join(_REPO_ROOT, ".dsp.env"),
+        os.path.expanduser("~/.dsp.conf"),
+    ]
+    for path in candidates:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip('"').strip("'")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+        break  # первый найденный конфиг побеждает
+
+
+_load_config()
+
 DEFAULT_PROXY = os.environ.get("DSP_PROXY", "http://127.0.0.1:8080")
-DEFAULT_CA = os.environ.get(
-    "DSP_CA", os.path.expanduser("~/.mitmproxy/mitmproxy-ca-cert.pem")
+DEFAULT_CA = os.path.expanduser(
+    os.environ.get("DSP_CA", "~/.mitmproxy/mitmproxy-ca-cert.pem")
 )
 DEFAULT_NO_PROXY = os.environ.get("DSP_NO_PROXY", "localhost,127.0.0.1,::1")
 DEFAULT_SECRET = os.environ.get("DSP_PROXY_SECRET", "123456")

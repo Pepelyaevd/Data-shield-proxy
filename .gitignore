@@ -37,3 +37,7 @@ report_out/
 .DS_Store
 .idea/
 .vscode/
+
+# Клиентский конфиг с секретом
+.dsp.env
+.dsp.conf

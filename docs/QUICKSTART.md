@@ -109,15 +109,28 @@ docker run -d --name dsp-proxy --restart unless-stopped \
 > Открытый прокси защищён `DSP_PROXY_SECRET`; для прод-безопасности ограничьте
 > порт 8080 на фаерволе списком IP клиентов.
 
-**Клиент** (один раз задать окружение, затем просто `dsp-launch`):
+**Клиент.** Конфиг провижинится один раз (в проде — через MDM/установщик),
+после чего команда запуска — одна. Лаунчер сам подхватывает `DSP_*` из файла
+`.dsp.env` (или `~/.dsp.conf`, или `$DSP_CONFIG`):
+
 ```bash
-export DSP_PROXY=http://<server-ip>:8080
-export DSP_PROXY_SECRET=123456
-export DSP_CA=/path/to/mitmproxy-ca-cert.pem   # CA, скопированный с сервера
-python3 launcher/launch.py --profile cli --user <me> --agent claude-code -- <agent>
+# провижининг один раз (файл с секретом, не коммитится):
+cat > .dsp.env <<'CFG'
+DSP_PROXY=http://<server-ip>:8080
+DSP_PROXY_SECRET=123456
+DSP_CA=/path/to/mitmproxy-ca-cert.pem
+CFG
 ```
-Клиент подключается как `http://<user>:<secret>@server:8080`: `user` → атрибуция,
-`secret` → ворота. Без верного секрета прокси отвечает `407`.
+
+Дальше сотрудник просто запускает агента через лаунчер — прокси, секрет, CA и
+идентичность (OS-логин) подхватываются автоматически:
+
+```bash
+python3 launcher/launch.py -- claude
+```
+
+Клиент подключается как `http://<user>:<secret>@server:8080`: `user` (OS-логин) →
+атрибуция, `secret` → ворота. Без верного секрета прокси отвечает `407`.
 
 ## Подключить нового агента
 
