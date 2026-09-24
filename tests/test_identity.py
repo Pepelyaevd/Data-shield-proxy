@@ -12,26 +12,26 @@ from proxy.identity import (  # noqa: E402
 
 class TestIdentity(unittest.TestCase):
     def test_roundtrip(self):
-        userinfo = encode_proxy_userinfo("alice", "claude-code")
+        userinfo = encode_proxy_userinfo("alice", "123456")
         header = "Basic " + base64.b64encode(userinfo.encode()).decode()
         ident = decode_proxy_authorization(header)
         self.assertIsNotNone(ident)
         self.assertEqual(ident.user, "alice")
-        self.assertEqual(ident.agent, "claude-code")
+        self.assertEqual(ident.secret, "123456")
 
     def test_user_only(self):
         userinfo = encode_proxy_userinfo("bob")
         header = "Basic " + base64.b64encode(userinfo.encode()).decode()
         ident = decode_proxy_authorization(header)
         self.assertEqual(ident.user, "bob")
-        self.assertIsNone(ident.agent)
+        self.assertIsNone(ident.secret)
 
     def test_special_chars(self):
-        userinfo = encode_proxy_userinfo("user@corp", "agent x")
+        userinfo = encode_proxy_userinfo("user@corp", "s3cr3t/pass")
         header = "Basic " + base64.b64encode(userinfo.encode()).decode()
         ident = decode_proxy_authorization(header)
         self.assertEqual(ident.user, "user@corp")
-        self.assertEqual(ident.agent, "agent x")
+        self.assertEqual(ident.secret, "s3cr3t/pass")
 
     def test_invalid(self):
         self.assertIsNone(decode_proxy_authorization(None))

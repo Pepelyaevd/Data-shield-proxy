@@ -43,6 +43,7 @@ DEFAULT_CA = os.environ.get(
     "DSP_CA", os.path.expanduser("~/.mitmproxy/mitmproxy-ca-cert.pem")
 )
 DEFAULT_NO_PROXY = os.environ.get("DSP_NO_PROXY", "localhost,127.0.0.1,::1")
+DEFAULT_SECRET = os.environ.get("DSP_PROXY_SECRET", "123456")
 
 
 def load_profiles() -> Dict:
@@ -50,12 +51,12 @@ def load_profiles() -> Dict:
         return json.load(f)
 
 
-def _proxy_with_identity(proxy_url: str, user: str, agent: str) -> str:
-    """Встраивает userinfo (user:agent) в URL прокси для атрибуции."""
+def _proxy_with_identity(proxy_url: str, user: str, secret: str) -> str:
+    """Встраивает userinfo (user:secret) в URL прокси: user — атрибуция, secret — ворота."""
     parts = urlsplit(proxy_url)
     host = parts.hostname or "127.0.0.1"
     netloc = host if parts.port is None else f"{host}:{parts.port}"
-    userinfo = encode_proxy_userinfo(user, agent)
+    userinfo = encode_proxy_userinfo(user, secret)
     return urlunsplit((parts.scheme or "http", f"{userinfo}@{netloc}", "", "", ""))
 
 
@@ -93,6 +94,7 @@ def main(argv=None) -> int:
     parser.add_argument("--user", default=None, help="идентичность пользователя (по умолчанию — OS-логин)")
     parser.add_argument("--agent", default="generic", help="машинное имя агента (claude-code, chatgpt-desktop, ...)")
     parser.add_argument("--proxy", default=DEFAULT_PROXY, help=f"URL прокси (по умолчанию {DEFAULT_PROXY})")
+    parser.add_argument("--secret", default=DEFAULT_SECRET, help="секрет-ворота прокси (по умолчанию из DSP_PROXY_SECRET)")
     parser.add_argument("--ca", default=DEFAULT_CA, help="путь к корпоративному CA-сертификату (PEM)")
     parser.add_argument("--no-proxy", default=DEFAULT_NO_PROXY, help="список исключений NO_PROXY")
     parser.add_argument("--dry-run", action="store_true", help="показать, что будет запущено, и выйти")
@@ -122,7 +124,7 @@ def main(argv=None) -> int:
         )
 
     subs = {
-        "proxy_url": _proxy_with_identity(args.proxy, user, args.agent),
+        "proxy_url": _proxy_with_identity(args.proxy, user, args.secret),
         "proxy_hostport": _hostport(args.proxy),
         "ca_path": args.ca,
         "no_proxy": args.no_proxy,
@@ -139,6 +141,7 @@ def main(argv=None) -> int:
         print(f"# user    : {user}")
         print(f"# agent   : {args.agent}")
         print(f"# proxy   : {args.proxy}")
+        print(f"# secret  : {'(задан)' if args.secret else '(нет)'}")
         print(f"# ca      : {args.ca}")
         print("# env overrides:")
         for k in profile.get("env", {}):

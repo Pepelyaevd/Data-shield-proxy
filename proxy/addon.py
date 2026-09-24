@@ -36,15 +36,51 @@ log = logging.getLogger("dsp.proxy")
 class DataShieldAddon:
     def __init__(self, config: Optional[ProxyConfig] = None) -> None:
         self.cfg = config or ProxyConfig.from_env()
-        self.store = EventStore(self.cfg.db_path)
+        self._store: Optional[EventStore] = None  # ленивое создание (не трогаем БД при импорте)
         self.dlp = DlpEngine(enforce=self.cfg.enforce)
         # identity по client_conn.id (устанавливается на CONNECT, живёт весь туннель)
         self._identity: Dict[str, Identity] = {}
         log.info(
-            "DataShield addon загружен: db=%s alert_only=%s scan_responses=%s",
+            "DataShield addon загружен: db=%s alert_only=%s auth=%s scan_responses=%s",
             self.cfg.db_path,
             not self.cfg.enforce,
+            self.cfg.auth_required,
             self.cfg.scan_responses,
+        )
+
+    @property
+    def store(self) -> EventStore:
+        if self._store is None:
+            self._store = EventStore(self.cfg.db_path)
+        return self._store
+
+    # ------------------------------------------------------------------ #
+    # Аутентификация (общий секрет-«ворота» открытого прокси, MVP)
+    # ------------------------------------------------------------------ #
+
+    def _check_secret(self, ident: Optional[Identity]) -> bool:
+        """True, если доступ разрешён. При отключённой проверке — всегда True."""
+        if not self.cfg.auth_required:
+            return True
+        if ident is None or ident.secret is None:
+            return False
+        if ident.secret != self.cfg.proxy_secret:
+            return False
+        if self.cfg.proxy_user and ident.user != self.cfg.proxy_user:
+            return False
+        return True
+
+    def _reject(self, flow) -> None:
+        """Отвечает 407 Proxy Authentication Required (доступ без верного секрета)."""
+        from mitmproxy import http  # ленивый импорт: addon импортируем и без mitmproxy
+
+        flow.response = http.Response.make(
+            407,
+            b"Proxy authentication required\n",
+            {
+                "Proxy-Authenticate": 'Basic realm="data-shield-proxy"',
+                "Content-Type": "text/plain",
+            },
         )
 
     # ------------------------------------------------------------------ #
@@ -55,6 +91,11 @@ class DataShieldAddon:
         ident = decode_proxy_authorization(
             flow.request.headers.get("Proxy-Authorization")
         )
+        if not self._check_secret(ident):
+            log.warning("Отклонён CONNECT (неверный/отсутствует секрет): %s",
+                        flow.request.pretty_host)
+            self._reject(flow)
+            return
         if ident:
             self._identity[flow.client_conn.id] = ident
 
@@ -90,6 +131,17 @@ class DataShieldAddon:
             log.exception("Ошибка обработки запроса")
 
     def _handle_request(self, flow) -> None:
+        # Аутентификация plain-HTTP запросов (CONNECT уже проверен в http_connect).
+        if self.cfg.auth_required and flow.client_conn.id not in self._identity:
+            ident0 = decode_proxy_authorization(
+                flow.request.headers.get("Proxy-Authorization")
+            )
+            if not self._check_secret(ident0):
+                log.warning("Отклонён запрос (неверный/отсутствует секрет): %s",
+                            flow.request.pretty_host)
+                self._reject(flow)
+                return
+
         host = flow.request.pretty_host
         provider = classify(host)
         ident = self._resolve_identity(flow)
@@ -203,10 +255,11 @@ class DataShieldAddon:
         return content
 
     def done(self) -> None:
-        try:
-            self.store.close()
-        except Exception:
-            pass
+        if self._store is not None:
+            try:
+                self._store.close()
+            except Exception:
+                pass
 
 
 # mitmproxy обнаруживает addons в списке `addons` на уровне модуля.

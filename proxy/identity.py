@@ -4,11 +4,12 @@
 на OS-пользователя / дефолт.
 
 Механизм MVP — стандартный и надёжный: лаунчер задаёт агенту прокси с userinfo
-    HTTPS_PROXY=http://<user>:<agent>@proxy-host:port
-Клиент передаёт это в заголовке `Proxy-Authorization: Basic base64(user:agent)`
-при CONNECT. Пароль здесь несёт не секрет, а имя агента — прокси не аутентифицирует
-по нему, только атрибутирует. Это даёт устойчивую привязку к пользователю
-(лучше, чем маппинг по IP).
+    HTTPS_PROXY=http://<user>:<secret>@proxy-host:port
+Клиент передаёт это в заголовке `Proxy-Authorization: Basic base64(user:secret)`
+при CONNECT. Здесь:
+  - username несёт идентичность пользователя (атрибуция, требование 5);
+  - password несёт общий секрет-«ворота» открытого прокси (MVP-защита от абьюза;
+    полноценные пользователи/токены/админка — после MVP).
 
 Fallback-порядок в addon: Proxy-Authorization → заголовки X-DSP-* → дефолт.
 """
@@ -18,25 +19,26 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 
 @dataclass
 class Identity:
     user: str = "unknown"
-    agent: Optional[str] = None
+    secret: Optional[str] = None  # общий секрет-«ворота» (из password userinfo)
+    agent: Optional[str] = None   # из заголовка X-DSP-Agent (gateway-режим)
     device: Optional[str] = None
 
 
-def encode_proxy_userinfo(user: str, agent: Optional[str] = None) -> str:
-    """Возвращает 'user:agent' для вставки в URL прокси (userinfo), URL-безопасно."""
+def encode_proxy_userinfo(user: str, secret: Optional[str] = None) -> str:
+    """Возвращает 'user:secret' для вставки в URL прокси (userinfo), URL-безопасно."""
     u = quote(user or "unknown", safe="")
-    a = quote(agent or "", safe="")
-    return f"{u}:{a}"
+    s = quote(secret or "", safe="")
+    return f"{u}:{s}"
 
 
 def decode_proxy_authorization(header_value: Optional[str]) -> Optional[Identity]:
-    """Разбирает 'Basic base64(user:agent)' → Identity. None, если не Basic/битый."""
+    """Разбирает 'Basic base64(user:secret)' → Identity. None, если не Basic/битый."""
     if not header_value:
         return None
     parts = header_value.strip().split(None, 1)
@@ -47,13 +49,11 @@ def decode_proxy_authorization(header_value: Optional[str]) -> Optional[Identity
     except Exception:
         return None
     if ":" in raw:
-        user, agent = raw.split(":", 1)
+        user, secret = raw.split(":", 1)
     else:
-        user, agent = raw, ""
-    from urllib.parse import unquote
-
+        user, secret = raw, ""
     user = unquote(user).strip()
-    agent = unquote(agent).strip()
+    secret = unquote(secret)
     if not user:
         return None
-    return Identity(user=user, agent=agent or None)
+    return Identity(user=user, secret=secret if secret != "" else None)

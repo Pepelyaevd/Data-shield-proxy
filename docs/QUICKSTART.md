@@ -89,6 +89,36 @@ cd deploy && docker compose run --rm report summary
 
 ---
 
+## Распределённый режим (прокси на отдельном хосте)
+
+Целевая топология: прокси + хранилище + отчёты на сервере, агент + лаунчер на
+машине сотрудника. Прокси открыт по адресу и защищён общим секретом-воротами
+(MVP; полноценные пользователи/токены/админка — после MVP).
+
+**Сервер** (Docker):
+```bash
+docker run -d --name dsp-proxy --restart unless-stopped \
+  -e DSP_DB_PATH=/app/data/events.db -e DSP_PROXY_SECRET=123456 \
+  -v /root/dsp:/app -w /app \
+  -v /root/dsp/mitmproxy-ca:/home/mitmproxy/.mitmproxy \
+  -p 8080:8080 mitmproxy/mitmproxy:latest \
+  mitmdump --listen-host 0.0.0.0 -p 8080 -s /app/proxy/addon.py \
+  --set stream_large_bodies=5m --set connection_strategy=lazy --set block_global=false
+```
+> `block_global=false` нужен, иначе mitmproxy режет подключения с публичных IP.
+> Открытый прокси защищён `DSP_PROXY_SECRET`; для прод-безопасности ограничьте
+> порт 8080 на фаерволе списком IP клиентов.
+
+**Клиент** (один раз задать окружение, затем просто `dsp-launch`):
+```bash
+export DSP_PROXY=http://<server-ip>:8080
+export DSP_PROXY_SECRET=123456
+export DSP_CA=/path/to/mitmproxy-ca-cert.pem   # CA, скопированный с сервера
+python3 launcher/launch.py --profile cli --user <me> --agent claude-code -- <agent>
+```
+Клиент подключается как `http://<user>:<secret>@server:8080`: `user` → атрибуция,
+`secret` → ворота. Без верного секрета прокси отвечает `407`.
+
 ## Подключить нового агента
 
 1. **Профиль запуска** — добавить запись в [../launcher/profiles.json](../launcher/profiles.json)
