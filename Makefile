@@ -4,6 +4,11 @@ SHELL := /bin/bash
 PY ?= python3
 VENV ?= .venv
 
+# Автоопределение Compose: плагин `docker compose` (v2) или standalone `docker-compose`.
+COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; \
+	elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; \
+	else echo "docker compose"; fi)
+
 .PHONY: help
 help: ## показать список команд
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -25,16 +30,16 @@ demo: ## сквозная демонстрация DoD без mitmproxy (pipelin
 
 .PHONY: proxy-up
 proxy-up: ## поднять прокси (docker compose)
-	cd deploy && docker compose up -d proxy
+	cd deploy && $(COMPOSE) up -d proxy
 	@echo "Прокси на :8080. CA сгенерируется в ~/.mitmproxy — затем: make ca-install"
 
 .PHONY: proxy-logs
 proxy-logs: ## смотреть логи прокси (DLP-алерты)
-	cd deploy && docker compose logs -f proxy
+	cd deploy && $(COMPOSE) logs -f proxy
 
 .PHONY: proxy-down
 proxy-down: ## остановить прокси
-	cd deploy && docker compose down
+	cd deploy && $(COMPOSE) down
 
 .PHONY: ca-install
 ca-install: ## установить CA mitmproxy в доверенное хранилище

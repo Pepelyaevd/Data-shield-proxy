@@ -81,7 +81,11 @@ make report-html                 # → report_out/report.html
 
 ```bash
 cd deploy && docker compose run --rm report summary
+# если Compose v2 не установлен — standalone-бинарь: docker-compose run --rm report summary
 ```
+
+> `make`-цели (`proxy-up`/`proxy-logs`/`proxy-down`) сами определяют, что
+> доступно — плагин `docker compose` или standalone `docker-compose`.
 
 ---
 
