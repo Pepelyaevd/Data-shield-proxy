@@ -224,6 +224,15 @@ API) в любом виде — CLI, desktop, IDE-плагины, подписо
 Scope MVP, пункты реализации и краткие пункты дальнейшего развития — в
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
+**Быстрый старт** (тесты, демо DoD, запуск прокси, отчёты) —
+[docs/QUICKSTART.md](docs/QUICKSTART.md):
+
+```bash
+make test    # 39 юнит-тестов (stdlib, без установки)
+make demo    # сквозной core-loop: посаженные секреты → инциденты с атрибуцией
+make proxy-up && make ca-install   # живой TLS-инспектирующий прокси (Docker)
+```
+
 ---
 
 ## Риски и ограничения

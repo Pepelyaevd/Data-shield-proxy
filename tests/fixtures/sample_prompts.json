@@ -1,0 +1,13 @@
+{
+  "_note": "Тестовые фикстуры с 'посаженными' секретами/PII. Значения синтетические (примеры-плейсхолдеры), не настоящие креды.",
+
+  "aws_key": "Please deploy using AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE for the pipeline.",
+  "private_key": "here is my key\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
+  "jwt": "auth header: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+  "connection_string": "db url is postgres://admin:s3cr3tPass@db.internal.corp:5432/prod",
+  "credit_card": "оплатите картой 4111 1111 1111 1111 срок 12/26",
+  "ru_inn": "реквизиты: ИНН 7707083893 ООО Пример",
+  "ru_snils": "СНИЛС сотрудника 112-233-445 95",
+  "email": "напиши на john.doe@corp-internal.example и подтверди",
+  "clean": "Привет! Помоги отрефакторить функцию сортировки на Python, вот код: def sort(a): return sorted(a)"
+}

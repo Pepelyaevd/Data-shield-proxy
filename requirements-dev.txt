@@ -1,0 +1,3 @@
+# Dev-зависимости (опционально; тесты работают и на stdlib unittest).
+-r requirements.txt
+pytest>=7.0

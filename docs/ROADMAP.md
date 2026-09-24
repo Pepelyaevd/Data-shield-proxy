@@ -60,60 +60,69 @@ SQLite с `user`+`agent` → CLI-отчёт показывает частоту 
 ### Пункты реализации
 
 1. **Каркас проекта**
-   - [ ] Структура репо: `proxy/`, `dlp/`, `catalog/`, `launcher/`, `storage/`,
+   - [x] Структура репо: `proxy/`, `dlp/`, `catalog/`, `launcher/`, `storage/`,
      `report/`, `deploy/`.
-   - [ ] Dev-окружение (Python venv, `mitmproxy`), Makefile/скрипты запуска.
+   - [x] Dev-окружение (Python venv, `mitmproxy`), Makefile/скрипты запуска.
 
 2. **CA и доверие**
-   - [ ] Встроенный самоподписанный CA `mitmproxy`.
-   - [ ] Скрипт установки CA в системный trust store + `NODE_EXTRA_CA_CERTS`.
+   - [x] Встроенный самоподписанный CA `mitmproxy` (генерируется при старте прокси).
+   - [x] Скрипт установки CA в системный trust store + `NODE_EXTRA_CA_CERTS`
+     ([deploy/install-ca.sh](../deploy/install-ca.sh)).
 
 3. **Прокси с TLS-инспекцией**
-   - [ ] Поднять `mitmproxy` в forward-режиме.
-   - [ ] Addon-скелет: хуки request/response, метаданные (dest, SNI, размер).
+   - [x] Поднять `mitmproxy` в forward-режиме ([deploy/docker-compose.yml](../deploy/docker-compose.yml)).
+   - [x] Addon: хуки request/response/error, метаданные (dest, SNI, размер)
+     ([proxy/addon.py](../proxy/addon.py)).
 
 4. **Каталог и парсер контента**
-   - [ ] Мини-каталог провайдеров (домены → провайдер), стартово Anthropic.
-   - [ ] Парсер тела Anthropic Messages → текст промпта (+ ответ).
-   - [ ] Generic JSON-fallback для прочих.
+   - [x] Мини-каталог провайдеров (домены → провайдер), стартово Anthropic.
+   - [x] Парсер тела Anthropic Messages → текст промпта (+ ответ, токены, SSE).
+   - [x] Generic JSON-fallback + OpenAI-парсер для прочих.
 
 5. **DLP-детекторы (alert-only)**
-   - [ ] Regex-секреты: AWS/GCP-ключи, private key, JWT, connection strings.
-   - [ ] PII: email, телефоны, карты (Luhn).
-   - [ ] Энтропийный детектор high-entropy строк.
-   - [ ] Результат: `verdict` + `matched_signatures[]`, без блокировки.
+   - [x] Regex-секреты: AWS/GCP/GitHub/Slack/Stripe/OpenAI/Anthropic-ключи,
+     private key, JWT, connection strings, присваивания кредов.
+   - [x] PII: email, телефоны, карты (Luhn), ИНН/СНИЛС (РФ, с валидацией).
+   - [x] Энтропийный детектор high-entropy строк.
+   - [x] Результат: `verdict` + `matched_signatures[]`, без блокировки; маскирование.
 
 6. **Идентичность пользователя**
-   - [ ] Лаунчер проставляет identity (заголовок/env), addon читает.
-   - [ ] Fallback на OS-пользователя.
+   - [x] Лаунчер проставляет identity (userinfo прокси → `Proxy-Authorization`),
+     addon читает; поддержка заголовков `X-DSP-*` (gateway-режим).
+   - [x] Fallback на OS-пользователя (в лаунчере) / дефолт (в addon).
 
 7. **Хранилище событий (SQLite)**
-   - [ ] Схема `events` (ts, user, agent, provider, model, dest, tokens, verdict,
-     signatures).
-   - [ ] Запись событий из addon.
+   - [x] Схема `events` (ts, user, agent, provider, model, dest, tokens, verdict,
+     signatures) — [storage/schema.sql](../storage/schema.sql).
+   - [x] Запись событий из addon (одно событие на обмен request/response).
 
 8. **Лаунчер (wrapper)**
-   - [ ] Профиль CLI (Claude Code): env `HTTPS_PROXY`/`NODE_EXTRA_CA_CERTS`/identity
-     → запуск агента.
-   - [ ] Профиль desktop: флаг `--proxy-server=…`.
-   - [ ] Краткая инструкция подключения нового агента.
+   - [x] Профиль CLI: env `HTTPS_PROXY`/`NODE_EXTRA_CA_CERTS`/identity → запуск агента.
+   - [x] Профиль desktop: флаг `--proxy-server=…`.
+   - [x] Инструкция подключения нового агента ([docs/QUICKSTART.md](QUICKSTART.md)).
 
 9. **Отчётность (CLI)**
-   - [ ] Частота использования по пользователям/агентам.
-   - [ ] Список DLP-инцидентов.
-   - [ ] (опц.) Минимальная read-only HTML-страница.
+   - [x] Частота использования по пользователям/агентам.
+   - [x] Список DLP-инцидентов.
+   - [x] Read-only HTML-страница ([report/html.py](../report/html.py)).
 
 10. **Инфраструктура запуска**
-    - [ ] `docker-compose` (proxy + report).
-    - [ ] README по локальному запуску.
+    - [x] `docker-compose` (proxy + report).
+    - [x] README по локальному запуску ([docs/QUICKSTART.md](QUICKSTART.md)).
 
 11. **Проверка DoD**
-    - [ ] Сквозной сценарий: промпт с посаженным секретом → инцидент в отчёте с
-      атрибуцией пользователю.
-    - [ ] Тестовые фикстуры (примеры секретов/PII).
+    - [x] Сквозной сценарий: промпт с посаженным секретом → инцидент в отчёте с
+      атрибуцией пользователю (`make demo`, `tests/test_e2e.py`).
+    - [x] Тестовые фикстуры ([tests/fixtures/sample_prompts.json](../tests/fixtures/sample_prompts.json)).
+
+> **Статус.** Ядро (catalog · parsers · dlp · storage · report · launcher · addon)
+> реализовано и покрыто 39 юнит-тестами; core-loop подтверждён `make demo`.
+> Живой TLS-MITM через mitmproxy запускается `make proxy-up` (требует Docker) —
+> транспортное звено не прогонялось в dev-окружении без Docker/mitmproxy.
 
 ### Оценка
-~2–3 недели.
+~2–3 недели. Ядро MVP реализовано; осталась живая приёмка через mitmproxy+Docker
+на реальном агенте.
 
 ---
 

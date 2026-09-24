@@ -1,0 +1,28 @@
+{
+  "_comment": "Профили запуска агентов. Подключить нового агента = добавить сюда профиль (env/флаги) + запись в catalog/catalog.py. Плейсхолдеры подставляет launcher/launch.py: {proxy_url} (со встроенной identity), {proxy_hostport}, {ca_path}, {no_proxy}.",
+
+  "cli": {
+    "description": "CLI-агенты, уважающие переменные окружения прокси (Claude Code, curl, python-requests, node ...).",
+    "type": "env",
+    "env": {
+      "HTTPS_PROXY": "{proxy_url}",
+      "HTTP_PROXY": "{proxy_url}",
+      "https_proxy": "{proxy_url}",
+      "http_proxy": "{proxy_url}",
+      "NO_PROXY": "{no_proxy}",
+      "no_proxy": "{no_proxy}",
+      "NODE_EXTRA_CA_CERTS": "{ca_path}",
+      "REQUESTS_CA_BUNDLE": "{ca_path}",
+      "SSL_CERT_FILE": "{ca_path}"
+    }
+  },
+
+  "desktop": {
+    "description": "Desktop/Electron/Chromium-агенты. --proxy-server не поддерживает userinfo → атрибуция по IP/дефолту. CA должен быть в системном trust store.",
+    "type": "flag",
+    "flags": ["--proxy-server={proxy_hostport}"],
+    "env": {
+      "NODE_EXTRA_CA_CERTS": "{ca_path}"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# Runtime-зависимости.
+#
+# Ядро (dlp, catalog, storage, report, launcher) работает на чистой stdlib —
+# ему зависимости не нужны. Единственная внешняя зависимость — mitmproxy для
+# локального запуска прокси без Docker. В Docker mitmproxy уже в базовом образе.
+#
+# Требует Python 3.10+ (последний mitmproxy). При старом Python используйте Docker.
+mitmproxy>=10.0

@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+data/
+*.log
+
+# CA material (never commit private keys)
+*.pem
+*.key
+*.crt
+!deploy/**/*.example
+mitmproxy-ca*
+.mitmproxy/
+
+# Reports output
+report_out/
+*.report.html
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

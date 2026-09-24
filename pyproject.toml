@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-shield-proxy"
+version = "0.1.0"
+description = "Корпоративный DLP-шлюз контроля использования AI-агентов (MVP)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+dependencies = []  # ядро — stdlib; mitmproxy ставится отдельно (requirements.txt)
+
+[project.optional-dependencies]
+proxy = ["mitmproxy>=10.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+dsp-launch = "launcher.launch:main"
+dsp-report = "report.cli:main"
+
+[tool.setuptools]
+packages = ["proxy", "dlp", "catalog", "storage", "report", "launcher"]
+
+[tool.setuptools.package-data]
+storage = ["schema.sql"]
+launcher = ["profiles.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

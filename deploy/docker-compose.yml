@@ -1,0 +1,41 @@
+# Локальный запуск MVP: форвард-прокси с TLS-инспекцией + (по профилю) отчётность.
+#
+#   cd deploy && docker compose up -d          # поднять прокси на :8080
+#   docker compose logs -f proxy               # смотреть DLP-алерты
+#   docker compose run --rm report summary     # отчёт (см. профиль tools)
+#
+# CA mitmproxy складывается в ~/.mitmproxy на хосте (там же его ждёт лаунчер).
+# События пишутся в ../data/events.db (bind-mount), доступны и хостовому отчёту.
+
+services:
+  proxy:
+    image: mitmproxy/mitmproxy:latest
+    working_dir: /app
+    command: >
+      mitmdump --listen-host 0.0.0.0 -p 8080
+      -s /app/proxy/addon.py
+      --set stream_large_bodies=5m
+      --set connection_strategy=lazy
+    environment:
+      DSP_DB_PATH: /app/data/events.db
+      DSP_DEFAULT_USER: unknown
+      # DSP_ENFORCE: "false"   # MVP: alert-only
+    ports:
+      - "8080:8080"
+    volumes:
+      - ..:/app                                   # код репозитория
+      - ../data:/app/data                         # события (SQLite)
+      - ${HOME}/.mitmproxy:/home/mitmproxy/.mitmproxy  # CA (стабильный путь для лаунчера)
+    restart: unless-stopped
+
+  # Разовые отчёты: docker compose run --rm report <usage|incidents|summary|html> ...
+  report:
+    image: python:3.12-slim
+    profiles: ["tools"]
+    working_dir: /app
+    entrypoint: ["python3", "-m", "report.cli"]
+    environment:
+      DSP_DB_PATH: /app/data/events.db
+    volumes:
+      - ..:/app
+      - ../data:/app/data
